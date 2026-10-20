@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cbo-api
+spec:
+  replicas: 3
+  selector: {matchLabels: {app: cbo-api}}
+  strategy: {rollingUpdate: {maxUnavailable: 0, maxSurge: 1}}
+  template:
+    metadata:
+      labels: {app: cbo-api}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, seccompProfile: {type: RuntimeDefault}}
+      topologySpreadConstraints:
+        - {maxSkew: 1, topologyKey: topology.kubernetes.io/zone, whenUnsatisfiable: ScheduleAnyway, labelSelector: {matchLabels: {app: cbo-api}}}
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: api
+          image: ghcr.io/manojrevenkar12-web/campaign-budget-optimizer
+          ports: [{name: http, containerPort: 8000}]
+          envFrom: [{secretRef: {name: cbo-db}}]   # DATABASE_URL, from AWS Secrets Manager via External Secrets
+          resources: {requests: {cpu: 500m, memory: 512Mi}, limits: {memory: 1Gi}}
+          readinessProbe: {httpGet: {path: /ready, port: http}, periodSeconds: 5, failureThreshold: 2}
+          livenessProbe: {httpGet: {path: /health, port: http}, periodSeconds: 15}
+          lifecycle: {preStop: {exec: {command: ["sleep", "5"]}}}   # let the load balancer drain before shutdown
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+          volumeMounts: [{name: tmp, mountPath: /tmp}]
+      volumes: [{name: tmp, emptyDir: {}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cbo-api
+  labels: {app: cbo-api}
+spec:
+  selector: {app: cbo-api}
+  ports: [{name: http, port: 80, targetPort: http}]
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: cbo-api
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: cbo-api}
+  minReplicas: 3
+  maxReplicas: 12
+  metrics: [{type: Resource, resource: {name: cpu, target: {type: Utilization, averageUtilization: 60}}}]
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: cbo-api
+spec:
+  minAvailable: 2
+  selector: {matchLabels: {app: cbo-api}}
+---
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: cbo-api
+spec:
+  selector: {matchLabels: {app: cbo-api}}
+  endpoints: [{port: http, path: /metrics, interval: 15s}]

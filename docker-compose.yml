@@ -1,0 +1,64 @@
+# Everything on one machine with simulated advertisers:
+#   docker compose up --build
+#   docker compose run --rm seed     # creates a tenant, prints its API key, loads 20 campaigns
+# Dashboard :8080, API :8000, Prometheus :9090, Grafana :3000
+name: campaign-budget-optimizer
+
+x-db: &db
+  DATABASE_URL: postgresql://cbo:cbo-dev@postgres:5432/cbo
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment: {POSTGRES_DB: cbo, POSTGRES_USER: cbo, POSTGRES_PASSWORD: cbo-dev}
+    volumes: [pg:/var/lib/postgresql/data]
+    healthcheck: {test: ["CMD-SHELL", "pg_isready -U cbo -d cbo"], interval: 3s, retries: 20}
+
+  trainer:
+    build: {context: ., target: trainer}
+    volumes: [models:/data]
+
+  api:
+    build: {context: ., target: runtime}
+    environment: *db
+    depends_on: {postgres: {condition: service_healthy}}
+    ports: ["8000:8000"]
+
+  worker:
+    build: {context: ., target: runtime}
+    command: ["cbo", "worker"]
+    environment: {<<: *db, CBO_DATA_DIR: /data}
+    volumes: [models:/data]
+    depends_on:
+      postgres: {condition: service_healthy}
+      trainer: {condition: service_completed_successfully}
+
+  seed:
+    build: {context: ., target: runtime}
+    profiles: [tools]
+    environment: *db
+    entrypoint: ["sh", "-c", "KEY=$$(cbo create-tenant demo) && echo \"API key: $$KEY\" && cbo seed --api http://api:8000 --key $$KEY --campaigns 20 --days 90"]
+
+  web:
+    build: {context: web}
+    depends_on: [api]
+    ports: ["8080:8080"]
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    volumes:
+      - ./ops/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./ops/prometheus/rules.yml:/etc/prometheus/rules.yml:ro
+    ports: ["9090:9090"]
+
+  grafana:
+    image: grafana/grafana:11.3.0
+    environment: {GF_AUTH_ANONYMOUS_ENABLED: "true", GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer}
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports: ["3000:3000"]
+
+volumes:
+  pg:
+  models:

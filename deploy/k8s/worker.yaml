@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cbo-worker
+spec:
+  replicas: 2   # jobs are claimed with SKIP LOCKED, so replicas never double-process
+  selector: {matchLabels: {app: cbo-worker}}
+  template:
+    metadata:
+      labels: {app: cbo-worker}
+    spec:
+      securityContext: {runAsNonRoot: true, runAsUser: 10001, fsGroup: 10001, seccompProfile: {type: RuntimeDefault}}
+      terminationGracePeriodSeconds: 60   # finish the current job on SIGTERM
+      initContainers:
+        - name: fetch-model
+          image: ghcr.io/manojrevenkar12-web/campaign-budget-optimizer
+          # the champion fatigue model, exported from the MLflow registry by the training pipeline
+          command: ["python", "-c", "import os, shutil; shutil.copy(os.environ['CBO_FATIGUE_MODEL_SRC'], '/data/fatigue_model.json')"]
+          env: [{name: CBO_FATIGUE_MODEL_SRC, value: /models/champion/fatigue_model.json}]
+          volumeMounts: [{name: data, mountPath: /data}, {name: models, mountPath: /models, readOnly: true}]
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+      containers:
+        - name: worker
+          image: ghcr.io/manojrevenkar12-web/campaign-budget-optimizer
+          args: ["cbo", "worker"]
+          ports: [{name: metrics, containerPort: 9100}]
+          envFrom: [{secretRef: {name: cbo-db}}]
+          env: [{name: CBO_DATA_DIR, value: /data}]
+          resources: {requests: {cpu: 500m, memory: 768Mi}, limits: {memory: 1536Mi}}
+          securityContext: {allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: ["ALL"]}}
+          volumeMounts: [{name: data, mountPath: /data}, {name: tmp, mountPath: /tmp}]
+      volumes:
+        - {name: data, emptyDir: {}}
+        - {name: tmp, emptyDir: {}}
+        - {name: models, persistentVolumeClaim: {claimName: cbo-models}}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: cbo-models
+spec:
+  accessModes: ["ReadOnlyMany"]
+  resources: {requests: {storage: 1Gi}}

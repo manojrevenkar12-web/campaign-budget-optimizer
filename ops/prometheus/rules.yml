@@ -1,0 +1,49 @@
+groups:
+  - name: cbo-slo-recording
+    rules:
+      - record: cbo:request_errors:ratio_rate5m
+        expr: sum(rate(cbo_http_requests_total{code=~"5.."}[5m])) / sum(rate(cbo_http_requests_total[5m]))
+      - record: cbo:request_errors:ratio_rate30m
+        expr: sum(rate(cbo_http_requests_total{code=~"5.."}[30m])) / sum(rate(cbo_http_requests_total[30m]))
+      - record: cbo:request_errors:ratio_rate1h
+        expr: sum(rate(cbo_http_requests_total{code=~"5.."}[1h])) / sum(rate(cbo_http_requests_total[1h]))
+      - record: cbo:request_errors:ratio_rate6h
+        expr: sum(rate(cbo_http_requests_total{code=~"5.."}[6h])) / sum(rate(cbo_http_requests_total[6h]))
+      - record: cbo:recommendation_slow:ratio_rate5m
+        expr: 1 - sum(rate(cbo_http_request_duration_seconds_bucket{route="/v1/campaigns/{campaign_id}/recommendations",le="0.3"}[5m])) / sum(rate(cbo_http_request_duration_seconds_count{route="/v1/campaigns/{campaign_id}/recommendations"}[5m]))
+      - record: cbo:recommendation_slow:ratio_rate1h
+        expr: 1 - sum(rate(cbo_http_request_duration_seconds_bucket{route="/v1/campaigns/{campaign_id}/recommendations",le="0.3"}[1h])) / sum(rate(cbo_http_request_duration_seconds_count{route="/v1/campaigns/{campaign_id}/recommendations"}[1h]))
+  - name: cbo-slo-alerts
+    rules:
+      - alert: CboAvailabilityBudgetBurnFast
+        expr: cbo:request_errors:ratio_rate1h > (14.4 * 0.001) and cbo:request_errors:ratio_rate5m > (14.4 * 0.001)
+        labels: {severity: page}
+        annotations:
+          summary: API errors are burning the 28-day error budget 14x too fast.
+          runbook: docs/slo.md#high-error-rate
+      - alert: CboAvailabilityBudgetBurnSlow
+        expr: cbo:request_errors:ratio_rate6h > (6 * 0.001) and cbo:request_errors:ratio_rate30m > (6 * 0.001)
+        labels: {severity: page}
+        annotations:
+          summary: API errors are burning the error budget 6x too fast.
+          runbook: docs/slo.md#high-error-rate
+      - alert: CboRecommendationLatencyBudgetBurn
+        expr: cbo:recommendation_slow:ratio_rate1h > (14.4 * 0.01) and cbo:recommendation_slow:ratio_rate5m > (14.4 * 0.01)
+        labels: {severity: page}
+        annotations:
+          summary: Too many recommendations are slower than 300 ms.
+          runbook: docs/slo.md#slow-recommendations
+      - alert: CboModelStale
+        expr: max(cbo_jobs_oldest_queued_seconds) > 1800
+        for: 5m
+        labels: {severity: page}
+        annotations:
+          summary: New stats have waited more than 30 minutes for a model refresh.
+          runbook: docs/slo.md#stale-model-freshness
+      - alert: CboDeadJobs
+        expr: max(cbo_jobs_dead) > 0
+        for: 10m
+        labels: {severity: ticket}
+        annotations:
+          summary: Some campaign refresh jobs failed every retry.
+          runbook: docs/slo.md#dead-jobs

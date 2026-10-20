@@ -1,0 +1,11 @@
+__pycache__/
+*.egg-info/
+.venv/
+.pytest_cache/
+.ruff_cache/
+data/
+mlruns/
+mlflow.db
+node_modules/
+web/dist/
+.env

@@ -1,0 +1,115 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  MLFLOW_DISABLE_AGENT_HINT: "1"
+  PIP_EXTRA_INDEX_URL: https://download.pytorch.org/whl/cpu
+
+jobs:
+  python:
+    name: lint and tests (with PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env: {POSTGRES_PASSWORD: postgres, POSTGRES_DB: cbo}
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cbo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "${{ env.PYTHON_VERSION }}", cache: pip}
+      - run: pip install -r requirements-dev.txt && pip install --no-deps -e .
+      - run: .github/run.sh ruff check src tests loadtest
+      - run: .github/run.sh ruff format --check src tests loadtest
+      - run: .github/run.sh python -m pytest -rs
+
+  loadtest:
+    name: SLO load test (API + worker + PostgreSQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16
+        env: {POSTGRES_PASSWORD: postgres, POSTGRES_DB: cbo}
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-retries 20
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/cbo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: {python-version: "${{ env.PYTHON_VERSION }}", cache: pip}
+      - run: pip install -r requirements.txt locust==2.46.6 && pip install --no-deps -e .
+      - name: Start the API, load 20 campaigns, fit them
+        run: |
+          cbo migrate
+          nohup uvicorn cbo.api.app:create_app --factory --port 8000 --workers 2 --no-access-log --log-level warning > api.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:8000/ready && break; sleep 1; done
+          KEY=$(cbo create-tenant loadtest)
+          echo "CBO_API_KEY=$KEY" >> "$GITHUB_ENV"
+          cbo seed --api http://localhost:8000 --key "$KEY" --campaigns 20 --days 60 | python -c "import json,sys; print('CBO_CAMPAIGNS=' + ','.join(json.load(sys.stdin)['campaigns']))" >> "$GITHUB_ENV"
+          cbo drain
+      - name: 60 seconds of morning traffic, then check the SLOs
+        run: |
+          locust -f loadtest/locustfile.py --headless -u 20 -r 5 -t 60s --host http://localhost:8000 --csv lt --only-summary > locust.log 2>&1
+          .github/run.sh python loadtest/check.py lt_stats.csv
+          echo "::notice title=load test::$(python loadtest/check.py lt_stats.csv | tr -d '\n')"
+
+  web:
+    name: dashboard (TypeScript, tests, build)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults: {run: {working-directory: web}}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: {node-version: "22", cache: npm, cache-dependency-path: web/package-lock.json}
+      - run: npm ci --no-audit --no-fund
+      - run: ../.github/run.sh npm run typecheck
+      - run: ../.github/run.sh npm test
+      - run: ../.github/run.sh npm run build
+
+  deploy:
+    name: images and infrastructure
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with: {terraform_version: "1.9.8"}
+      - name: Terraform
+        working-directory: deploy/terraform
+        run: |
+          ../../.github/run.sh terraform fmt -check -diff
+          terraform init -backend=false -input=false > /dev/null
+          ../../.github/run.sh terraform validate
+      - name: Kubernetes manifests
+        run: |
+          kubectl kustomize deploy/k8s > /tmp/k8s.yaml
+          docker run --rm -v /tmp:/m ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary -ignore-missing-schemas /m/k8s.yaml
+      - run: docker compose config --quiet
+      - name: Build images
+        run: |
+          .github/run.sh docker build --progress=plain --target runtime -t cbo:runtime .
+          .github/run.sh docker build --progress=plain --target trainer -t cbo:trainer .
+          .github/run.sh docker build --progress=plain -t cbo:web web
+      - name: Smoke-test the images (train the fatigue model, run the API)
+        run: |
+          docker run --rm cbo:trainer cbo train-fatigue --out /tmp/m --campaigns 30 --days 100 > train.log 2>&1 || { tail -40 train.log; exit 1; }
+          docker run -d --name pg -e POSTGRES_PASSWORD=pw -e POSTGRES_DB=cbo postgres:16-alpine
+          sleep 5
+          docker run -d --name api --link pg -e DATABASE_URL=postgresql://postgres:pw@pg:5432/cbo -p 8000:8000 cbo:runtime
+          for i in $(seq 1 30); do curl -sf localhost:8000/ready && break; sleep 1; done
+          curl -sf localhost:8000/ready && curl -sf localhost:8000/metrics | grep -q cbo_jobs_queued

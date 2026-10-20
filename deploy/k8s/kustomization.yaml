@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+namespace: cbo
+labels:
+  - pairs: {app.kubernetes.io/part-of: campaign-budget-optimizer}
+images:
+  - name: ghcr.io/manojrevenkar12-web/campaign-budget-optimizer
+    newTag: "1.0.0"
+resources:
+  - namespace.yaml
+  - migrate-job.yaml
+  - api.yaml
+  - worker.yaml
+  - networkpolicy.yaml
+  - slo-rules.yaml
