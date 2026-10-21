@@ -30,6 +30,6 @@ def fatigue_model(tmp_path_factory):
 
     out = tmp_path_factory.mktemp("fatigue")
     report = train(str(out), n_campaigns=40, days=120, register=False)
-    from cbo.fatigue.train import load_champion
+    from cbo.fatigue.model import load_champion
 
     return load_champion(str(out)), report

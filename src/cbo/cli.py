@@ -10,6 +10,7 @@ import sys
 
 def main(argv: list[str] | None = None) -> int:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+    logging.getLogger("httpx").setLevel(logging.WARNING)
     p = argparse.ArgumentParser(prog="cbo")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("serve")
@@ -49,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
         import os
 
         from cbo.db.db import make_pool, migrate
-        from cbo.fatigue.train import load_champion
+        from cbo.fatigue.model import load_champion
         from cbo.worker.worker import drain
 
         pool = make_pool()

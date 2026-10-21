@@ -7,7 +7,10 @@ with NumPy; a parity test checks both give the same probabilities.
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 
@@ -128,3 +131,10 @@ def torch_predict(model: FatigueModel, x: np.ndarray) -> np.ndarray:
     with torch.no_grad():
         z = net(torch.tensor((x - mean) / std, dtype=torch.float32))[:, 0] / model.temperature
     return torch.sigmoid(z).numpy()
+
+
+def load_champion(out_dir: str = "data") -> FatigueModel | None:
+    """The serving side loads the exported file (copied from the registry's champion at deploy
+    time), so the API and worker images need neither PyTorch nor MLflow."""
+    p = Path(os.environ.get("CBO_FATIGUE_MODEL", f"{out_dir}/fatigue_model.json"))
+    return FatigueModel.from_json(json.loads(p.read_text())) if p.exists() else None

@@ -19,7 +19,7 @@ from prometheus_client import Counter, Histogram, start_http_server
 from psycopg_pool import ConnectionPool
 
 from cbo import service
-from cbo.fatigue.train import load_champion
+from cbo.fatigue.model import load_champion
 
 log = logging.getLogger("cbo.worker")
 LEASE_SECONDS = 300

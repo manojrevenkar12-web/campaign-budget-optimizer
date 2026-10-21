@@ -18,7 +18,7 @@ import pandas as pd
 from sklearn.metrics import average_precision_score, roc_auc_score
 
 from cbo.fatigue.data import FEATURES, generate
-from cbo.fatigue.model import FatigueModel, torch_predict, train_torch
+from cbo.fatigue.model import FatigueModel, load_champion, torch_predict, train_torch  # noqa: F401 - re-exported
 
 MODEL_NAME = "creative_fatigue"
 os.environ.setdefault("MLFLOW_DISABLE_AGENT_HINT", "1")
@@ -142,9 +142,3 @@ def _register(model: FatigueModel, report: dict, out: Path) -> dict:
     if report["gate"]["promote"]:
         client.set_registered_model_alias(MODEL_NAME, "champion", mv.version)
     return {"version": int(mv.version), "run_id": run.info.run_id, "champion": report["gate"]["promote"]}
-
-
-def load_champion(out_dir: str = "data") -> FatigueModel | None:
-    """The API loads the exported file (mounted from the registry by the deploy job)."""
-    p = Path(os.environ.get("CBO_FATIGUE_MODEL", f"{out_dir}/fatigue_model.json"))
-    return FatigueModel.from_json(json.loads(p.read_text())) if p.exists() else None
