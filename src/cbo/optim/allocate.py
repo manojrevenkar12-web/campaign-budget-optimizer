@@ -85,10 +85,23 @@ def allocate(curves: list[Curve], budget: float, lo: np.ndarray, hi: np.ndarray)
     t = np.linspace(0.0, 1.0, GRID)
     grid = lo[:, None] + (hi - lo)[:, None] * t[None, :]  # ad sets x grid
     marg = np.einsum("nm,ngm->ng", wa_k, np.exp(-grid[:, :, None] / k[:, None, :]))  # decreasing along the grid
-    rev_m, rev_s = marg[:, ::-1], grid[:, ::-1]  # increasing marginal, for np.interp
+    rev_m, rev_s = marg[:, ::-1], grid[:, ::-1]  # increasing marginal per row
+    n = len(curves)
+    # one searchsorted for all ad sets: shift row i by i * band so the rows' value ranges don't overlap
+    band = float(rev_m.max() - rev_m.min()) + 1.0
+    shift = np.arange(n) * band
+    flat = (rev_m + shift[:, None]).ravel()
+    first = np.arange(n) * GRID
 
     def spend(lam: float) -> np.ndarray:
-        return np.array([np.interp(lam, rev_m[i], rev_s[i]) for i in range(len(curves))])
+        """Spend at which each ad set's marginal return equals lam (clamped to its corridor):
+        np.interp row by row, vectorised."""
+        j = np.clip(np.searchsorted(flat, lam + shift) - first, 1, GRID - 1)
+        rows = np.arange(n)
+        x0, x1 = rev_m[rows, j - 1], rev_m[rows, j]
+        s0, s1 = rev_s[rows, j - 1], rev_s[rows, j]
+        frac = np.clip(np.divide(lam - x0, x1 - x0, out=np.zeros(n), where=x1 > x0), 0.0, 1.0)
+        return s0 + frac * (s1 - s0)
 
     lam_lo, lam_hi = 0.0, float(marg[:, 0].max()) * 2 + 1e-12
     for _ in range(60):

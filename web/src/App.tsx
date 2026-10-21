@@ -99,14 +99,14 @@ function CampaignView({ id }: { id: string }) {
                   <td className="r">{eur(l.marginal_cost_per_conversion)}</td>
                   <td>
                     {l.cold_start && <span className="badge">new, learning</span>}
-                    {l.at_upper_guardrail && <span className="badge">capped at +{Math.round(r.guardrails.max_change * 100)}%</span>}
-                    {l.at_lower_guardrail && <span className="badge">floor</span>}
+                    {l.at_upper_guardrail && <span className="badge">{r.guardrails.relaxed ? "at widened limit" : `capped at +${Math.round(r.guardrails.max_change * 100)}%`}</span>}
+                    {l.at_lower_guardrail && <span className="badge">{r.guardrails.relaxed ? "at widened floor" : "floor"}</span>}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
-          <p className="note">Budgets move at most {Math.round(r.guardrails.max_change * 100)}% a day so the ad platforms' delivery learning is not reset. "Next conversion costs" is the marginal cost at the planned spend: the split is optimal when these are as equal as the limits allow.</p>
+          <p className="note">Budgets move at most {Math.round(r.guardrails.max_change * 100)}% a day so the ad platforms' delivery learning is not reset.{r.guardrails.relaxed && " This budget is outside what that allows from yesterday's spend, so every ad set's limit was widened in proportion."} "Next conversion costs" is the marginal cost at the planned spend: the split evens these out as far as the limits allow, apart from a small exploration share that keeps testing ad sets the model is still unsure about.</p>
         </section>
       )}
       <section className="panel">
@@ -119,7 +119,7 @@ function CampaignView({ id }: { id: string }) {
           <table>
             <thead><tr><th>Creative</th><th>Ad set</th><th className="r">Likelihood of wearing out within 7 days</th></tr></thead>
             <tbody>{risk.data.creatives.map((c) => (
-              <tr key={c.creative_id}><td>{c.creative_id}</td><td>{c.ad_set_id}</td><td className="r">{c.state === "already_fatigued" ? "already worn out" : `${Math.round(c.probability * 100)}%`}</td></tr>
+              <tr key={c.creative_id}><td>{c.creative_id}</td><td>{c.ad_set_id}</td><td className="r">{c.state === "already_fatigued" ? "already 20%+ below its best CTR" : `${Math.round(c.probability * 100)}%`}</td></tr>
             ))}</tbody>
           </table>
         ) : <p className="muted">No creative is likely to wear out in the next week.</p>}

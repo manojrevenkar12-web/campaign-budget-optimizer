@@ -11,7 +11,7 @@ from psycopg.types.json import Jsonb
 
 from cbo.fatigue.data import FEATURES, HEALTHY, features_from_history
 from cbo.fatigue.model import FatigueModel
-from cbo.model.response import Posterior, fit, pooled_cpa, weekday_multipliers
+from cbo.model.response import Posterior, fit, intervals, pooled_cpa, weekday_multipliers
 from cbo.optim.allocate import Guardrails, allocate, bounds, marginal
 
 HISTORY_DAYS = 120
@@ -178,9 +178,11 @@ def recommend(
     else:
         raise ValueError(f"unknown policy {policy}")
     lines = []
-    for s, p, m, x, mc, lo_i, hi_i in zip(sets, posts, mults, alloc, mean_curves, lo, hi, strict=True):
+    ilos, ihis = intervals(posts, alloc)
+    for s, p, m, x, mc, lo_i, hi_i, ilo, ihi in zip(
+        sets, posts, mults, alloc, mean_curves, lo, hi, ilos, ihis, strict=True
+    ):
         exp_conv = float(p.expected(x)[0] * m)
-        ilo, ihi = p.interval(float(x))
         mg = marginal(mc, float(x))
         lines.append(
             {

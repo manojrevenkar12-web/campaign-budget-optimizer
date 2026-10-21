@@ -1,11 +1,11 @@
 import { eur, niceMax, num } from "./format";
 import type { Curve, Line } from "./api";
 
-const COLORS = ["#2d5bd7", "#d9480f", "#2b8a3e", "#ae3ec9", "#0c8599", "#e8590c", "#5c7cfa", "#a61e4d"];
+const COLORS = ["#2d5bd7", "#d9480f", "#2b8a3e", "#ae3ec9", "#0c8599", "#f08c00", "#868e96", "#a61e4d"];
 
 /** Posterior-mean conversions vs daily spend per ad set, with today's recommended spend marked. */
 export function Curves({ curves, lines }: { curves: Curve[]; lines?: Line[] }) {
-  const W = 560, H = 260, L = 48, B = 34, T = 12, R = 12;
+  const W = 560, H = 260, L = 48, B = 34, T = 12, R = 30;
   const xMax = niceMax(Math.max(...curves.flatMap((c) => c.spend)));
   const yMax = niceMax(Math.max(...curves.flatMap((c) => c.conversions)));
   const x = (v: number) => L + (v / xMax) * (W - L - R);

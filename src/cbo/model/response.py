@@ -61,13 +61,26 @@ class Posterior:
         s = np.atleast_1d(np.asarray(spend, float))
         return (w[None, :] * a[None, :] * (1 - np.exp(-s[:, None] / k[None, :]))).sum(1)
 
-    def interval(self, spend: float, level: float = 0.8, draws: int = 2000, seed: int = 0) -> tuple[float, float]:
-        rng = np.random.default_rng(seed)
-        idx = rng.choice(len(self.k), size=draws, p=np.asarray(self.weight) / np.sum(self.weight))
-        a = rng.gamma(np.asarray(self.alpha)[idx], 1.0 / np.asarray(self.beta)[idx])
-        y = a * (1 - np.exp(-spend / np.asarray(self.k)[idx]))
-        lo, hi = np.quantile(y, [(1 - level) / 2, (1 + level) / 2])
-        return float(lo), float(hi)
+    def interval(self, spend: float, level: float = 0.8, draws: int = 1000, seed: int = 0) -> tuple[float, float]:
+        lo, hi = intervals([self], np.array([spend]), level, draws, seed)
+        return float(lo[0]), float(hi[0])
+
+
+def intervals(
+    posteriors: list[Posterior], spends: np.ndarray, level: float = 0.8, draws: int = 1000, seed: int = 0
+) -> tuple[np.ndarray, np.ndarray]:
+    """Central `level` intervals of conversions at `spends`, for many ad sets in one vectorised
+    pass (this is on the request path: one call per recommendation, not one per ad set)."""
+    rng = np.random.default_rng(seed)
+    w = np.array([p.weight for p in posteriors], float)
+    cdf = np.cumsum(w / w.sum(1, keepdims=True), axis=1)
+    u = rng.random((len(posteriors), draws))
+    idx = np.minimum((u[:, :, None] > cdf[:, None, :]).sum(-1), cdf.shape[1] - 1)  # inverse-CDF draw of k
+    take = lambda attr: np.take_along_axis(np.array([getattr(p, attr) for p in posteriors], float), idx, 1)  # noqa: E731
+    a = rng.gamma(take("alpha"), 1.0 / take("beta"))
+    y = a * (1 - np.exp(-np.asarray(spends, float)[:, None] / take("k")))
+    q = np.quantile(y, [(1 - level) / 2, (1 + level) / 2], axis=1)
+    return q[0], q[1]
 
 
 def fit(
