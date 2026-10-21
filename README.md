@@ -78,7 +78,7 @@ if recommendation p99 is above 300 ms or the error rate is above 0.1%.
 | Run | Requests | Failures | Throughput | Recommendation p50 / p95 / p99 |
 |---|---|---|---|---|
 | 2-vCPU dev container | 7,941 | 0 | 134 req/s | 23 / 65 / 98 ms |
-| GitHub Actions runner | 7,565 | 0 | 128 req/s | 24 / 140 / 210 ms |
+| GitHub Actions runner, two runs | 7,565 / 7,378 | 0 | 125–128 req/s | 24 / 140–200 / 210–290 ms |
 
 The first version failed this test, with a p99 of 440 ms on the runner. Its allocator ran a
 numerical solve for every ad set inside every step of the outer bisection. The current version
@@ -206,7 +206,8 @@ curl -s -X POST localhost:8000/v1/campaigns/c0003/recommendations \
 - **Terraform and the Kubernetes manifests are validated in CI but not deployed.** CI runs
   `terraform validate` and `kubectl kustomize` with a schema check.
 - **The load test ran on a CI runner and a dev container,** not on production-sized pods behind a
-  load balancer.
+  load balancer. On the shared runner the p99 varies between runs (210–290 ms), so the margin to
+  the 300 ms objective there is thin; the dev container has much more headroom (98 ms).
 
 ## Repository
 
